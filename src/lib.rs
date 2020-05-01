@@ -1,5 +1,3 @@
-use proc_macro::TokenStream;
-
 use proc_macro2::{Ident, Span};
 
 use quote::{format_ident, ToTokens};
@@ -7,8 +5,11 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::Group;
-use syn::{Expr, ExprLit, ExprPath, Lit};
+use syn::{Expr, ExprLit, Lit};
 use syn::{ExprGroup, Token};
+
+#[allow(dead_code)]
+mod builder;
 
 struct Input {
     source: String,
@@ -74,7 +75,22 @@ impl Parse for Input {
     }
 }
 
-#[proc_macro]
-pub fn test(input: TokenStream) -> TokenStream {
-    panic!()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use quote::quote;
+
+    #[test]
+    fn test() {
+        let input: Input = syn::parse2(quote! {
+            "lol",
+            "lolz"
+        })
+        .unwrap();
+        assert_eq!(input.source, "lol");
+
+        let ident_strings: Vec<String> = input.arg_names.iter().map(ToString::to_string).collect();
+        assert_eq!(ident_strings, vec!["arg0".to_owned()]);
+    }
 }
