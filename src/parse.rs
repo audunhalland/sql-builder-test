@@ -67,10 +67,11 @@ impl Parse for Else {
 
 enum Constituent {
     Sql(LitStr),
+    Bind(Expr),
     If(If),
 }
 
-struct BuilderSyntax {
+struct BuilderAST {
     pub constituents: Vec<Constituent>,
 }
 
@@ -83,9 +84,9 @@ fn parse_next_constituent(input: ParseStream) -> syn::Result<Constituent> {
         return Ok(Constituent::If(input.parse()?));
     }
 
-    input.parse::<Expr>()?;
+    let expr = input.parse::<Expr>()?;
 
-    Err(input.error("Unrecognized"))
+    Ok(Constituent::Bind(expr))
 }
 
 fn parse_constituents(input: ParseStream) -> syn::Result<Vec<Constituent>> {
@@ -99,10 +100,10 @@ fn parse_constituents(input: ParseStream) -> syn::Result<Vec<Constituent>> {
     }
 }
 
-impl Parse for BuilderSyntax {
+impl Parse for BuilderAST {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let constituents = parse_constituents(&input)?;
-        Ok(BuilderSyntax { constituents })
+        Ok(BuilderAST { constituents })
     }
 }
 
@@ -154,15 +155,26 @@ mod tests {
     }
 
     #[test]
-    fn parse_root() {
+    fn parse_ast_bind() {
+        let two = 2i32;
+        let ast: BuilderAST = syn::parse2(quote! {
+            "SELECT yo FROM saft WHERE a = " #two + #two " AND b IS NOT NULL"
+        })
+        .unwrap();
+
+        assert_eq!(ast.constituents.len(), 3);
+    }
+
+    #[test]
+    fn parse_ast_if() {
         let test = true;
-        let syntax: BuilderSyntax = syn::parse2(quote! {
+        let ast: BuilderAST = syn::parse2(quote! {
             "SELECT yo FROM saft WHERE"
             if #test { "bar = " "yo" } else { "TRUE" }
             "YO"
         })
         .unwrap();
 
-        assert_eq!(syntax.constituents.len(), 3);
+        assert_eq!(ast.constituents.len(), 3);
     }
 }
