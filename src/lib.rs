@@ -3,6 +3,7 @@ use quote::quote;
 
 #[allow(dead_code)]
 mod builder;
+mod codegen;
 mod parse;
 
 #[proc_macro]

@@ -6,9 +6,9 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Expr, ExprLit, Lit};
 use syn::{ExprGroup, ExprIf, LitStr, Token};
 
-struct SqlBlock {
-    brace_token: syn::token::Brace,
-    constituents: Vec<Constituent>,
+pub struct SqlBlock {
+    pub brace_token: syn::token::Brace,
+    pub constituents: Vec<Constituent>,
 }
 
 impl Parse for SqlBlock {
@@ -21,11 +21,11 @@ impl Parse for SqlBlock {
     }
 }
 
-struct If {
-    if_token: Token![if],
-    cond: Box<Expr>,
-    then_branch: SqlBlock,
-    else_branch: Option<Else>,
+pub struct If {
+    pub if_token: Token![if],
+    pub cond: Box<Expr>,
+    pub then_branch: SqlBlock,
+    pub else_branch: Option<Else>,
 }
 
 impl Parse for If {
@@ -45,7 +45,7 @@ impl Parse for If {
     }
 }
 
-enum Else {
+pub enum Else {
     If(Token![else], Box<If>),
     Block(Token![else], SqlBlock),
 }
@@ -65,19 +65,24 @@ impl Parse for Else {
     }
 }
 
-enum Constituent {
-    Sql(LitStr),
+pub enum Constituent {
+    Literal(LitStr),
     Bind(Expr),
+    Block(SqlBlock),
     If(If),
 }
 
-struct BuilderAST {
+pub struct BuilderAST {
     pub constituents: Vec<Constituent>,
 }
 
 fn parse_next_constituent(input: ParseStream) -> syn::Result<Constituent> {
     if input.peek(LitStr) {
-        return Ok(Constituent::Sql(input.parse()?));
+        return Ok(Constituent::Literal(input.parse()?));
+    }
+
+    if input.peek(syn::token::Brace) {
+        return Ok(Constituent::Block(input.parse()?));
     }
 
     if input.peek(Token!(if)) {
@@ -155,10 +160,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_ast_with_block() {
+        let ast: BuilderAST = syn::parse2(quote! {
+            "SELECT col FROM table "
+            "WHERE " {
+                "LOLG"
+            }
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn parse_ast_with_try_block() {
+        let a = Some(42_i32);
+        let ast: BuilderAST = syn::parse2(quote! {
+            "SELECT * " { "WHERE " #a? }
+        })
+        .unwrap();
+        assert_eq!(ast.constituents.len(), 2);
+    }
+
+    #[test]
     fn parse_ast_bind() {
         let two = 2i32;
         let ast: BuilderAST = syn::parse2(quote! {
-            "SELECT yo FROM saft WHERE a = " #two + #two " AND b IS NOT NULL"
+            "SELECT col FROM table WHERE a = " #two + #two " AND b IS NOT NULL"
         })
         .unwrap();
 

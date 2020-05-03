@@ -1,5 +1,5 @@
 [package]
-name = "sql-builder-test"
+name = "sql_builder_test"
 version = "0.1.0"
 authors = ["Audun Halland <audun.halland@gmail.com>"]
 edition = "2018"
