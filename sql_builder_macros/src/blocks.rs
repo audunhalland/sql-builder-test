@@ -8,8 +8,14 @@ pub enum Push {
     Bind,
 }
 
+pub enum Cond {
+    If(Box<Expr>),
+    ElseIf(Box<Expr>),
+    Else,
+}
+
 pub struct Branch {
-    pub cond: Option<Box<Expr>>,
+    pub cond: Cond,
     pub then: Vec<Block>,
 }
 
@@ -62,7 +68,7 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
 
                 let mut branches = vec![];
                 branches.push(Branch {
-                    cond: Some(iff.cond),
+                    cond: Cond::If(iff.cond),
                     then: create_blocks(iff.then_branch.constituents),
                 });
 
@@ -72,14 +78,14 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                     match else_branch {
                         parse::Else::If(_token, iff) => {
                             branches.push(Branch {
-                                cond: Some(iff.cond),
+                                cond: Cond::ElseIf(iff.cond),
                                 then: create_blocks(iff.then_branch.constituents),
                             });
                             next = iff.else_branch;
                         }
                         parse::Else::Block(_token, block) => {
                             branches.push(Branch {
-                                cond: None,
+                                cond: Cond::Else,
                                 then: create_blocks(block.constituents),
                             });
                             break;

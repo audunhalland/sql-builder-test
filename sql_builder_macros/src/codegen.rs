@@ -24,14 +24,14 @@ fn gen_push_stmt(push: blocks::Push, gen_data: &GenData) -> TokenStream {
         blocks::Push::Lit(lit_str) => {
             let sql_str_ident = &gen_data.sql_str_ident;
             quote! {
-                write!(#sql_str_ident, #lit_str)?;
+                write!(&mut #sql_str_ident, #lit_str).unwrap();
             }
         }
         blocks::Push::Bind => {
             let sql_str_ident = &gen_data.sql_str_ident;
             let query_args_ident = &gen_data.query_args_ident;
             quote! {
-                write!(#sql_str_ident, "${}", #query_args_ident.len())?;
+                write!(&mut #sql_str_ident, "${}", #query_args_ident.len()).unwrap();
             }
         }
     }
@@ -50,16 +50,16 @@ fn gen_pushes(pushes: Vec<blocks::Push>, gen_data: &GenData) -> TokenStream {
 
 fn gen_branch(branch: blocks::Branch, gen_data: &GenData) -> TokenStream {
     let then = gen_blocks(branch.then, &gen_data);
-    if let Some(cond) = branch.cond {
-        quote! {
-            if #cond {
-                #then
-            }
-        }
-    } else {
-        quote! {
-            { #then }
-        }
+    match branch.cond {
+        blocks::Cond::If(cond) => quote! {
+            if #cond { #then }
+        },
+        blocks::Cond::ElseIf(cond) => quote! {
+            else if #cond { #then }
+        },
+        blocks::Cond::Else => quote! {
+            else { #then }
+        },
     }
 }
 
@@ -70,7 +70,7 @@ fn gen_branches(branches: Vec<blocks::Branch>, gen_data: &GenData) -> TokenStrea
         .collect();
 
     quote! {
-        #(#stmts else)*
+        #(#stmts)*
     }
 }
 
@@ -94,12 +94,24 @@ fn gen_blocks(blocks: Vec<blocks::Block>, gen_data: &GenData) -> TokenStream {
 
 pub fn codegen(ast: parse::BuilderAST) -> TokenStream {
     let blocks = blocks::create_blocks(ast.constituents);
-    let statements = gen_blocks(blocks, &GenData::default());
+    let gen_data = GenData::default();
+    let statements = gen_blocks(blocks, &gen_data);
+
+    let sql_str_ident = &gen_data.sql_str_ident;
+    let query_args_ident = &gen_data.query_args_ident;
 
     quote! {
-        let mut sql_str = String::new();
+        macro_rules! macro_result {
+            ($($tokens:tt)*) => {{
+                use std::fmt::Write;
+                let mut #sql_str_ident = String::new();
+                let mut #query_args_ident: Vec<bool> = Vec::new();
 
-        #statements
+                #statements
+
+                #sql_str_ident
+            }}
+        }
     }
 }
 
