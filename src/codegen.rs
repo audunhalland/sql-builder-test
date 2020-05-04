@@ -7,14 +7,14 @@ use crate::parse;
 
 struct GenData {
     sql_str_ident: proc_macro2::Ident,
-    sql_args_ident: proc_macro2::Ident,
+    query_args_ident: proc_macro2::Ident,
 }
 
 impl Default for GenData {
     fn default() -> Self {
         GenData {
             sql_str_ident: quote::format_ident!("sql_str"),
-            sql_args_ident: quote::format_ident!("sql_args"),
+            query_args_ident: quote::format_ident!("query_args"),
         }
     }
 }
@@ -29,9 +29,9 @@ fn gen_push_stmt(push: blocks::Push, gen_data: &GenData) -> TokenStream {
         }
         blocks::Push::Bind => {
             let sql_str_ident = &gen_data.sql_str_ident;
-            let sql_args_ident = &gen_data.sql_args_ident;
+            let query_args_ident = &gen_data.query_args_ident;
             quote! {
-                write!(#sql_str_ident, "${}", #sql_args_ident.len())?;
+                write!(#sql_str_ident, "${}", #query_args_ident.len())?;
             }
         }
     }
