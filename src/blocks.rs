@@ -1,16 +1,16 @@
 use std::iter::IntoIterator;
-use syn::{Expr, ExprLit, Lit};
+use syn::{Expr, ExprLit, Lit, LitStr};
 
 use crate::parse;
 
 pub enum Push {
-    Lit,
+    Lit(LitStr),
     Bind,
 }
 
 pub struct Branch {
-    cond: Option<Box<Expr>>,
-    then: Vec<Block>,
+    pub cond: Option<Box<Expr>>,
+    pub then: Vec<Block>,
 }
 
 pub enum Block {
@@ -33,7 +33,7 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
             }
             Some(parse::Constituent::Literal(_)) => {
                 pushes.push(match peek_ast.next().unwrap() {
-                    parse::Constituent::Literal(_) => Push::Lit,
+                    parse::Constituent::Literal(lit_str) => Push::Lit(lit_str),
                     _ => panic!(),
                 });
             }
@@ -55,18 +55,18 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                     pushes = vec![];
                 }
 
-                let if_expr = match peek_ast.next().unwrap() {
-                    parse::Constituent::If(if_expr) => if_expr,
+                let iff = match peek_ast.next().unwrap() {
+                    parse::Constituent::If(iff) => iff,
                     _ => panic!(),
                 };
 
                 let mut branches = vec![];
                 branches.push(Branch {
-                    cond: Some(if_expr.cond),
-                    then: create_blocks(if_expr.then_branch.constituents),
+                    cond: Some(iff.cond),
+                    then: create_blocks(iff.then_branch.constituents),
                 });
 
-                let mut next = if_expr.else_branch;
+                let mut next = iff.else_branch;
 
                 while let Some(else_branch) = next {
                     match else_branch {
