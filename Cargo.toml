@@ -14,3 +14,4 @@ edition = "2018"
 
 [dependencies]
 sql_builder_macros = { version = "0.1.0", path = "sql_builder_macros" }
+proc-macro-hack = "0.5"

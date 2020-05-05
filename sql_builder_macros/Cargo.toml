@@ -13,3 +13,4 @@ proc-macro = true
 syn = { version = "1.0.16", features = [ "full" ] }
 quote = { version = "1.0.4", default-features = false }
 proc-macro2 = { version = "1.0.9", default-features = false }
+proc-macro-hack = "0.5"

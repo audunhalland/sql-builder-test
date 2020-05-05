@@ -115,6 +115,27 @@ pub fn codegen(ast: parse::BuilderAST) -> TokenStream {
     }
 }
 
+pub fn codegen2(ast: parse::BuilderAST) -> TokenStream {
+    let blocks = blocks::create_blocks(ast.constituents);
+    let gen_data = GenData::default();
+    let statements = gen_blocks(blocks, &gen_data);
+
+    let sql_str_ident = &gen_data.sql_str_ident;
+    let query_args_ident = &gen_data.query_args_ident;
+
+    quote! {
+        {
+            use std::fmt::Write;
+            let mut #sql_str_ident = String::new();
+            let mut #query_args_ident: Vec<bool> = Vec::new();
+
+            #statements
+
+            #sql_str_ident
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
