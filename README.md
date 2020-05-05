@@ -1,6 +1,6 @@
 # sql_builder_test
 
-Just a (for now) a silly experimental macro for _readable_ SQL builders
+Just (for now) a silly experimental macro for _readable_ SQL builders
 
 Example:
 
