@@ -18,8 +18,6 @@ fn something_is_working_at_least_but_the_implementation_is_bugged() {
 #[test]
 fn its_actually_working_with_proc_macro_hack() {
     let foo = Option::<i32>::None;
-    // BUG: referring to outer variables doesn't work yet
-
     let test = build_query2!(
         "SELECT * FROM lol WHERE "
         if let Some(i) = foo {

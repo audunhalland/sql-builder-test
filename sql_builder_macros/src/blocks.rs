@@ -1,5 +1,8 @@
 use std::iter::IntoIterator;
-use syn::{Expr, ExprLit, Lit, LitStr};
+
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::{Expr, LitStr};
 
 use crate::parse;
 
@@ -8,19 +11,15 @@ pub enum Push {
     Bind,
 }
 
-pub enum Cond {
-    If(Box<Expr>),
-    ElseIf(Box<Expr>),
-    Else,
-}
-
 pub struct Branch {
-    pub cond: Cond,
+    pub keywords: TokenStream,
+    pub cond: Option<Box<Expr>>,
     pub then: Vec<Block>,
 }
 
 pub enum Block {
     Push(Vec<Push>),
+    // "Flattened" branch - the length of the vec is the number of possibilities:
     Branch(Vec<Branch>),
 }
 
@@ -65,10 +64,12 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                     parse::Constituent::If(iff) => iff,
                     _ => panic!(),
                 };
+                let if_token = iff.if_token;
 
                 let mut branches = vec![];
                 branches.push(Branch {
-                    cond: Cond::If(iff.cond),
+                    keywords: quote! { #if_token },
+                    cond: Some(iff.cond),
                     then: create_blocks(iff.then_branch.constituents),
                 });
 
@@ -76,16 +77,19 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
 
                 while let Some(else_branch) = next {
                     match else_branch {
-                        parse::Else::If(_token, iff) => {
+                        parse::Else::If(else_token, iff) => {
+                            let if_token = iff.if_token;
                             branches.push(Branch {
-                                cond: Cond::ElseIf(iff.cond),
+                                keywords: quote! { #else_token #if_token },
+                                cond: Some(iff.cond),
                                 then: create_blocks(iff.then_branch.constituents),
                             });
                             next = iff.else_branch;
                         }
-                        parse::Else::Block(_token, block) => {
+                        parse::Else::Block(else_token, block) => {
                             branches.push(Branch {
-                                cond: Cond::Else,
+                                keywords: quote! { #else_token },
+                                cond: None,
                                 then: create_blocks(block.constituents),
                             });
                             break;

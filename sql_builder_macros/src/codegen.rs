@@ -50,16 +50,15 @@ fn gen_pushes(pushes: Vec<blocks::Push>, gen_data: &GenData) -> TokenStream {
 
 fn gen_branch(branch: blocks::Branch, gen_data: &GenData) -> TokenStream {
     let then = gen_blocks(branch.then, &gen_data);
-    match branch.cond {
-        blocks::Cond::If(cond) => quote! {
-            if #cond { #then }
-        },
-        blocks::Cond::ElseIf(cond) => quote! {
-            else if #cond { #then }
-        },
-        blocks::Cond::Else => quote! {
-            else { #then }
-        },
+    let keywords = branch.keywords;
+    if let Some(cond) = branch.cond {
+        quote! {
+            #keywords #cond { #then }
+        }
+    } else {
+        quote! {
+            #keywords { #then }
+        }
     }
 }
 
@@ -155,7 +154,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", stream),
-            "write ! ( sql_str , \"SELECT\" ) ? ;"
+            "write ! ( & mut sql_str , \"SELECT\" ) . unwrap ( ) ;"
         );
     }
 
@@ -169,7 +168,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", stream),
-            "write ! ( sql_str , \"${}\" , sql_args . len ( ) ) ? ;"
+            "write ! ( & mut sql_str , \"${}\" , query_args . len ( ) ) . unwrap ( ) ;"
         );
     }
 
@@ -187,7 +186,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", stream),
-            "if true { write ! ( sql_str , \"SELECT\" ) ? ; } else { write ! ( sql_str , \"DELETE\" ) ? ; } else"
+            "if true { write ! ( & mut sql_str , \"SELECT\" ) . unwrap ( ) ; } else { write ! ( & mut sql_str , \"DELETE\" ) . unwrap ( ) ; }"
         );
     }
 }
