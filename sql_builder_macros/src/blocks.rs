@@ -99,6 +99,9 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
 
                 blocks.push(Block::Branch(branches));
             }
+            Some(parse::Constituent::Match(_)) => {
+                panic!("match is not supported yet");
+            }
         }
     }
 }

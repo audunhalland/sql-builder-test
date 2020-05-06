@@ -1,10 +1,4 @@
-use proc_macro2::{Ident, Span};
-
-use quote::{format_ident, ToTokens};
-use syn::braced;
 use syn::parse::{Parse, ParseStream};
-use syn::{Expr, ExprLit, Lit};
-use syn::{ExprGroup, ExprIf, LitStr, Token};
 
 pub struct SqlBlock {
     pub brace_token: syn::token::Brace,
@@ -15,15 +9,15 @@ impl Parse for SqlBlock {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         Ok(SqlBlock {
-            brace_token: braced!(content in input),
+            brace_token: syn::braced!(content in input),
             constituents: parse_constituents(&content)?,
         })
     }
 }
 
 pub struct If {
-    pub if_token: Token![if],
-    pub cond: Box<Expr>,
+    pub if_token: syn::Token![if],
+    pub cond: Box<syn::Expr>,
     pub then_branch: SqlBlock,
     pub else_branch: Option<Else>,
 }
@@ -32,10 +26,10 @@ impl Parse for If {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         Ok(If {
             if_token: input.parse()?,
-            cond: Box::new(input.parse()?),
+            cond: Box::new(input.parse()?), // BUG: https://github.com/dtolnay/syn/issues/789
             then_branch: input.parse()?,
             else_branch: {
-                if input.peek(Token![else]) {
+                if input.peek(syn::Token![else]) {
                     Some(input.parse()?)
                 } else {
                     None
@@ -46,16 +40,16 @@ impl Parse for If {
 }
 
 pub enum Else {
-    If(Token![else], Box<If>),
-    Block(Token![else], SqlBlock),
+    If(syn::Token![else], Box<If>),
+    Block(syn::Token![else], SqlBlock),
 }
 
 impl Parse for Else {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let else_token: Token![else] = input.parse()?;
+        let else_token: syn::Token![else] = input.parse()?;
         let lookahead = input.lookahead1();
 
-        if input.peek(Token![if]) {
+        if input.peek(syn::Token![if]) {
             Ok(Else::If(else_token, Box::new(input.parse()?)))
         } else if input.peek(syn::token::Brace) {
             Ok(Else::Block(else_token, input.parse()?))
@@ -65,11 +59,87 @@ impl Parse for Else {
     }
 }
 
+pub struct Match {
+    pub match_token: syn::Token![match],
+    pub expr: Box<syn::Expr>,
+    pub brace_token: syn::token::Brace,
+    pub arms: Vec<MatchArm>,
+}
+
+impl Parse for Match {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let match_token: syn::Token![match] = input.parse()?;
+        let expr = input.parse()?; // BUG: https://github.com/dtolnay/syn/issues/789
+
+        let content;
+        let brace_token = syn::braced!(content in input);
+
+        let mut arms = Vec::new();
+        while !content.is_empty() {
+            arms.push(content.call(MatchArm::parse)?);
+        }
+
+        Ok(Match {
+            match_token,
+            expr: Box::new(expr),
+            brace_token,
+            arms,
+        })
+    }
+}
+
+pub struct MatchArm {
+    pub pat: syn::Pat,
+    pub guard: Option<(syn::Token![if], Box<syn::Expr>)>,
+    pub fat_arrow_token: syn::Token![=>],
+    pub body: SqlBlock,
+}
+
+impl Parse for MatchArm {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(MatchArm {
+            pat: {
+                let leading_vert: Option<syn::Token![|]> = input.parse()?;
+                let pat: syn::Pat = input.parse()?;
+                if leading_vert.is_some() || input.peek(syn::Token![|]) {
+                    let mut cases = syn::punctuated::Punctuated::new();
+                    cases.push_value(pat);
+                    while input.peek(syn::Token![|]) {
+                        let punct = input.parse()?;
+                        cases.push_punct(punct);
+                        let pat: syn::Pat = input.parse()?;
+                        cases.push_value(pat);
+                    }
+                    syn::Pat::Or(syn::PatOr {
+                        attrs: Vec::new(),
+                        leading_vert,
+                        cases,
+                    })
+                } else {
+                    pat
+                }
+            },
+            guard: {
+                if input.peek(syn::Token![if]) {
+                    let if_token: syn::Token![if] = input.parse()?;
+                    let guard: syn::Expr = input.parse()?;
+                    Some((if_token, Box::new(guard)))
+                } else {
+                    None
+                }
+            },
+            fat_arrow_token: input.parse()?,
+            body: input.parse()?,
+        })
+    }
+}
+
 pub enum Constituent {
-    Literal(LitStr),
-    Bind(Expr),
+    Literal(syn::LitStr),
+    Bind(syn::Expr),
     Block(SqlBlock),
     If(If),
+    Match(Match),
 }
 
 pub struct BuilderAST {
@@ -77,7 +147,7 @@ pub struct BuilderAST {
 }
 
 fn parse_next_constituent(input: ParseStream) -> syn::Result<Constituent> {
-    if input.peek(LitStr) {
+    if input.peek(syn::LitStr) {
         return Ok(Constituent::Literal(input.parse()?));
     }
 
@@ -85,11 +155,15 @@ fn parse_next_constituent(input: ParseStream) -> syn::Result<Constituent> {
         return Ok(Constituent::Block(input.parse()?));
     }
 
-    if input.peek(Token!(if)) {
+    if input.peek(syn::Token!(if)) {
         return Ok(Constituent::If(input.parse()?));
     }
 
-    let expr = input.parse::<Expr>()?;
+    if input.peek(syn::Token!(match)) {
+        return Ok(Constituent::Match(input.parse()?));
+    }
+
+    let expr = input.parse::<syn::Expr>()?;
 
     Ok(Constituent::Bind(expr))
 }
@@ -160,8 +234,38 @@ mod tests {
     }
 
     #[test]
+    fn parse_match_arm() {
+        syn::parse2::<MatchArm>(quote! {
+            Some(2) => {}
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn parse_match_empty() {
+        syn::parse2::<Match>(quote! {
+            match Some(42) {}
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn parse_match_var_with_arms() {
+        let var = quote::format_ident!("var");
+        let match_ = syn::parse2::<Match>(quote! {
+            match #var {
+                Some(37) => { "A" "B" }
+                Some(83) => { "A" "C" }
+            }
+        })
+        .unwrap();
+
+        assert_eq!(match_.arms.len(), 2);
+    }
+
+    #[test]
     fn parse_ast_with_block() {
-        let ast: BuilderAST = syn::parse2(quote! {
+        syn::parse2::<BuilderAST>(quote! {
             "SELECT col FROM table "
             "WHERE " {
                 "LOLG"
@@ -202,5 +306,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(ast.constituents.len(), 3);
+    }
+
+    #[test]
+    fn parse_ast_match() {
+        let test = Some(42);
+        let ast: BuilderAST = syn::parse2(quote! {
+            "SELECT yo FROM saft WHERE"
+            match #test {
+                Some(42) => { "TRUE" }
+            }
+        })
+        .unwrap();
+
+        assert_eq!(ast.constituents.len(), 2);
     }
 }
