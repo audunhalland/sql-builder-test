@@ -2,18 +2,18 @@ use std::iter::IntoIterator;
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Expr, LitStr};
 
 use crate::parse;
 
 pub enum Push {
-    Lit(LitStr),
-    Bind,
+    Lit(syn::LitStr),
+    Bind(syn::Expr),
+    Empty,
 }
 
 pub struct Branch {
     pub keywords: TokenStream,
-    pub cond: Option<Box<Expr>>,
+    pub cond: Option<Box<syn::Expr>>,
     pub then: Vec<Block>,
 }
 
@@ -44,13 +44,13 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
             }
             Some(parse::Constituent::Bind(_)) => {
                 pushes.push(match peek_ast.next().unwrap() {
-                    parse::Constituent::Bind(_) => Push::Bind,
+                    parse::Constituent::Bind(expr) => Push::Bind(expr),
                     _ => panic!(),
                 });
             }
             Some(parse::Constituent::Block(_)) => {
                 pushes.push(match peek_ast.next().unwrap() {
-                    parse::Constituent::Block(_) => Push::Bind,
+                    parse::Constituent::Block(_) => Push::Empty,
                     _ => panic!(),
                 });
             }

@@ -6,33 +6,32 @@ use crate::blocks;
 use crate::parse;
 
 struct GenData {
-    sql_str_ident: proc_macro2::Ident,
-    query_args_ident: proc_macro2::Ident,
+    builder_ident: proc_macro2::Ident,
 }
 
 impl Default for GenData {
     fn default() -> Self {
         GenData {
-            sql_str_ident: quote::format_ident!("sql_str"),
-            query_args_ident: quote::format_ident!("query_args"),
+            builder_ident: quote::format_ident!("builder"),
         }
     }
 }
 
 fn gen_push_stmt(push: blocks::Push, gen_data: &GenData) -> TokenStream {
+    let builder_ident = &gen_data.builder_ident;
     match push {
         blocks::Push::Lit(lit_str) => {
-            let sql_str_ident = &gen_data.sql_str_ident;
             quote! {
-                write!(&mut #sql_str_ident, #lit_str).unwrap();
+                #builder_ident.push_sql(#lit_str);
             }
         }
-        blocks::Push::Bind => {
-            let sql_str_ident = &gen_data.sql_str_ident;
-            let query_args_ident = &gen_data.query_args_ident;
+        blocks::Push::Bind(expr) => {
             quote! {
-                write!(&mut #sql_str_ident, "${}", #query_args_ident.len()).unwrap();
+                #builder_ident.push_arg(#expr);
             }
+        }
+        blocks::Push::Empty => {
+            quote! {}
         }
     }
 }
@@ -96,18 +95,19 @@ pub fn codegen(ast: parse::BuilderAST) -> TokenStream {
     let gen_data = GenData::default();
     let statements = gen_blocks(blocks, &gen_data);
 
-    let sql_str_ident = &gen_data.sql_str_ident;
-    let query_args_ident = &gen_data.query_args_ident;
+    let builder_ident = &gen_data.builder_ident;
+
+    let builder_path: syn::Path = syn::parse_str("sql_builder_test::Builder").unwrap();
 
     quote! {
         {
             use std::fmt::Write;
-            let mut #sql_str_ident = String::new();
-            let mut #query_args_ident: Vec<bool> = Vec::new();
+
+            let mut #builder_ident = #builder_path::new();
 
             #statements
 
-            #sql_str_ident
+            #builder_ident.build()
         }
     }
 }
@@ -165,5 +165,63 @@ mod tests {
             format!("{}", stream),
             "if true { write ! ( & mut sql_str , \"SELECT\" ) . unwrap ( ) ; } else { write ! ( & mut sql_str , \"DELETE\" ) . unwrap ( ) ; }"
         );
+    }
+
+    #[test]
+    fn experiment() {
+        use std::fmt::Write;
+
+        struct Builder {
+            sql: String,
+            args: Vec<String>,
+            arg_count: usize,
+        }
+
+        fn fmt0(b: &mut Builder) {
+            write!(b.sql, "SELECT ").unwrap();
+        }
+        fn fmt1_b0(b: &mut Builder) {
+            write!(b.sql, "arg ").unwrap();
+            write!(b.sql, "${}", b.arg_count).unwrap();
+            b.arg_count += 1;
+        }
+        fn fmt1_b0_0(b: &mut Builder) {
+            write!(b.sql, "SUB ").unwrap();
+        }
+
+        let a = Some("value".to_owned());
+
+        let f0 = move |b: &mut Builder| {
+            fmt0(b);
+        };
+        let f1_0 = move |b: &mut Builder| {
+            fmt1_b0_0(b);
+        };
+        let f1 = move |b: &mut Builder| {
+            if let Some(arg) = a {
+                fmt1_b0(b);
+                b.args.push(arg);
+                f1_0(b);
+            }
+        };
+
+        let mut b = Builder {
+            sql: String::new(),
+            args: Vec::new(),
+            arg_count: 0,
+        };
+
+        if true {
+            // Dynamic
+            f0(&mut b);
+            f1(&mut b);
+        } else {
+            // Static
+            fmt0(&mut b);
+            fmt1_b0(&mut b);
+            fmt1_b0_0(&mut b);
+        }
+
+        assert_eq!(b.sql, "SELECT arg SUB ");
     }
 }
