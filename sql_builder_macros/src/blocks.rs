@@ -1,9 +1,50 @@
 use std::iter::IntoIterator;
+use std::rc::Rc;
 
 use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::parse;
+
+pub struct Counter(u32);
+
+impl Counter {
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    fn next(&mut self) -> u32 {
+        let next = self.0;
+        self.0 += 1;
+        next
+    }
+}
+
+pub struct NodeId {
+    pub parent: Option<Rc<NodeId>>,
+    pub id: u32,
+    pub local_index: u16,
+}
+
+pub struct Parent(Option<Rc<NodeId>>);
+
+impl Parent {
+    pub fn root() -> Self {
+        Parent(None)
+    }
+
+    fn id(&self) -> Rc<NodeId> {
+        self.0.clone().unwrap()
+    }
+
+    fn child(&self, index: usize, counter: &mut Counter) -> Parent {
+        Self(Some(Rc::new(NodeId {
+            parent: self.0.as_ref().map(|id| id.clone()),
+            id: counter.next(),
+            local_index: index as u16,
+        })))
+    }
+}
 
 pub enum Push {
     Lit(syn::LitStr),
@@ -17,13 +58,22 @@ pub struct Branch {
     pub then: Vec<Block>,
 }
 
-pub enum Block {
+pub enum Op {
     Push(Vec<Push>),
     // "Flattened" branch - the length of the vec is the number of possibilities:
     Branch(Vec<Branch>),
 }
 
-pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
+pub struct Block {
+    pub op: Op,
+    pub id: Rc<NodeId>,
+}
+
+pub fn create_blocks(
+    constituents: Vec<parse::Constituent>,
+    parent: Parent,
+    counter: &mut Counter,
+) -> Vec<Block> {
     let mut peek_ast = constituents.into_iter().peekable();
     let mut pushes = vec![];
     let mut blocks = vec![];
@@ -32,7 +82,10 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
         match peek_ast.peek() {
             None => {
                 if !pushes.is_empty() {
-                    blocks.push(Block::Push(pushes));
+                    blocks.push(Block {
+                        op: Op::Push(pushes),
+                        id: parent.child(blocks.len(), counter).id(),
+                    });
                 }
                 return blocks;
             }
@@ -56,9 +109,13 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
             }
             Some(parse::Constituent::If(_)) => {
                 if !pushes.is_empty() {
-                    blocks.push(Block::Push(pushes));
+                    blocks.push(Block {
+                        op: Op::Push(pushes),
+                        id: parent.child(blocks.len(), counter).id(),
+                    });
                     pushes = vec![];
                 }
+                let branch_parent = parent.child(blocks.len(), counter);
 
                 let iff = match peek_ast.next().unwrap() {
                     parse::Constituent::If(iff) => iff,
@@ -70,7 +127,11 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                 branches.push(Branch {
                     keywords: quote! { #if_token },
                     cond: Some(iff.cond),
-                    then: create_blocks(iff.then_branch.constituents),
+                    then: create_blocks(
+                        iff.then_branch.constituents,
+                        branch_parent.child(branches.len(), counter),
+                        counter,
+                    ),
                 });
 
                 let mut next = iff.else_branch;
@@ -82,7 +143,11 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                             branches.push(Branch {
                                 keywords: quote! { #else_token #if_token },
                                 cond: Some(iff.cond),
-                                then: create_blocks(iff.then_branch.constituents),
+                                then: create_blocks(
+                                    iff.then_branch.constituents,
+                                    branch_parent.child(branches.len(), counter),
+                                    counter,
+                                ),
                             });
                             next = iff.else_branch;
                         }
@@ -90,14 +155,21 @@ pub fn create_blocks(constituents: Vec<parse::Constituent>) -> Vec<Block> {
                             branches.push(Branch {
                                 keywords: quote! { #else_token },
                                 cond: None,
-                                then: create_blocks(block.constituents),
+                                then: create_blocks(
+                                    block.constituents,
+                                    branch_parent.child(branches.len(), counter),
+                                    counter,
+                                ),
                             });
                             break;
                         }
                     }
                 }
 
-                blocks.push(Block::Branch(branches));
+                blocks.push(Block {
+                    op: Op::Branch(branches),
+                    id: branch_parent.id(),
+                });
             }
             Some(parse::Constituent::Match(_)) => {
                 panic!("match is not supported yet");
@@ -128,7 +200,7 @@ mod tests {
             "date"
         })
         .unwrap();
-        let blocks = create_blocks(ast.constituents);
+        let blocks = create_blocks(ast.constituents, Parent::root(), &mut Counter::new());
         assert_eq!(blocks.len(), 3);
     }
 }

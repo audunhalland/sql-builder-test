@@ -23,14 +23,17 @@ impl Builder {
         write!(self.sql, "{}", sql).unwrap();
     }
 
-    #[inline]
-    pub fn push_arg<T>(&mut self, arg: T)
-    where
-        T: Sized,
-    {
+    pub fn push_sql_arg(&mut self) {
         use std::fmt::Write;
         write!(self.sql, "${}", self.args_count).unwrap();
         self.args_count += 1;
+    }
+
+    #[inline]
+    pub fn push_bind_arg<T>(&mut self, arg: T)
+    where
+        T: Sized,
+    {
         self.args_size += std::mem::size_of_val(&arg);
     }
 

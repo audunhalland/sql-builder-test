@@ -6,14 +6,78 @@ use crate::blocks;
 use crate::parse;
 
 struct GenData {
+    builder_path: syn::Path,
     builder_ident: proc_macro2::Ident,
 }
 
 impl Default for GenData {
     fn default() -> Self {
         GenData {
+            builder_path: syn::parse_str("sql_builder_test::Builder").unwrap(),
             builder_ident: quote::format_ident!("builder"),
         }
+    }
+}
+
+fn get_sql_fmt_fn_ident(id: &blocks::NodeId) -> proc_macro2::Ident {
+    quote::format_ident!("sql_fmt_{}", id.id)
+}
+
+fn gen_sql_fmt_fn(
+    pushes: &[blocks::Push],
+    node_id: &blocks::NodeId,
+    gen_data: &GenData,
+) -> TokenStream {
+    let builder_ident = quote::format_ident!("b");
+    let stmts: Vec<_> = pushes
+        .into_iter()
+        .map(|push| match push {
+            blocks::Push::Lit(lit_str) => {
+                quote! {
+                    #builder_ident.push_sql(#lit_str);
+                }
+            }
+            blocks::Push::Bind(_) => {
+                quote! {
+                    #builder_ident.push_sql_arg();
+                }
+            }
+            blocks::Push::Empty => {
+                quote! {}
+            }
+        })
+        .collect();
+
+    let builder_path = &gen_data.builder_path;
+    let fn_ident = get_sql_fmt_fn_ident(node_id);
+
+    quote! {
+        fn #fn_ident(#builder_ident: &mut #builder_path) {
+            #(#stmts)*
+        }
+    }
+}
+
+fn gen_sql_fmt_fns(blocks: &[blocks::Block], gen_data: &GenData) -> TokenStream {
+    let output: Vec<_> = blocks
+        .into_iter()
+        .map(|block| match &block.op {
+            blocks::Op::Push(pushes) => gen_sql_fmt_fn(pushes, &block.id, gen_data),
+            blocks::Op::Branch(branches) => {
+                let output: Vec<_> = branches
+                    .into_iter()
+                    .map(|branch| gen_sql_fmt_fns(&branch.then, gen_data))
+                    .collect();
+
+                quote! {
+                    #(#output)*
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        #(#output)*
     }
 }
 
@@ -27,7 +91,7 @@ fn gen_push_stmt(push: blocks::Push, gen_data: &GenData) -> TokenStream {
         }
         blocks::Push::Bind(expr) => {
             quote! {
-                #builder_ident.push_arg(#expr);
+                #builder_ident.push_bind_arg(#expr);
             }
         }
         blocks::Push::Empty => {
@@ -73,9 +137,15 @@ fn gen_branches(branches: Vec<blocks::Branch>, gen_data: &GenData) -> TokenStrea
 }
 
 fn gen_block(block: blocks::Block, gen_data: &GenData) -> TokenStream {
-    match block {
-        blocks::Block::Push(pushes) => gen_pushes(pushes, gen_data),
-        blocks::Block::Branch(branches) => gen_branches(branches, gen_data),
+    match block.op {
+        blocks::Op::Push(_) => {
+            let builder_ident = &gen_data.builder_ident;
+            let fmt_fn_ident = get_sql_fmt_fn_ident(&block.id);
+            quote! {
+                #fmt_fn_ident(&mut #builder_ident);
+            }
+        }
+        blocks::Op::Branch(branches) => gen_branches(branches, gen_data),
     }
 }
 
@@ -91,8 +161,13 @@ fn gen_blocks(blocks: Vec<blocks::Block>, gen_data: &GenData) -> TokenStream {
 }
 
 pub fn codegen(ast: parse::BuilderAST) -> TokenStream {
-    let blocks = blocks::create_blocks(ast.constituents);
+    let blocks = blocks::create_blocks(
+        ast.constituents,
+        blocks::Parent::root(),
+        &mut blocks::Counter::new(),
+    );
     let gen_data = GenData::default();
+    let sql_fmt_fns = gen_sql_fmt_fns(&blocks, &gen_data);
     let statements = gen_blocks(blocks, &gen_data);
 
     let builder_ident = &gen_data.builder_ident;
@@ -102,6 +177,8 @@ pub fn codegen(ast: parse::BuilderAST) -> TokenStream {
     quote! {
         {
             use std::fmt::Write;
+
+            #sql_fmt_fns
 
             let mut #builder_ident = #builder_path::new();
 
@@ -117,7 +194,11 @@ mod tests {
     use super::*;
 
     fn test_gen_blocks(ast: parse::BuilderAST) -> TokenStream {
-        let blocks = blocks::create_blocks(ast.constituents);
+        let blocks = blocks::create_blocks(
+            ast.constituents,
+            blocks::Parent::root(),
+            &mut blocks::Counter::new(),
+        );
         gen_blocks(blocks, &GenData::default())
     }
 
@@ -129,10 +210,7 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(
-            format!("{}", stream),
-            "write ! ( & mut sql_str , \"SELECT\" ) . unwrap ( ) ;"
-        );
+        assert_eq!(format!("{}", stream), "sql_fmt_0 ( & mut builder ) ;");
     }
 
     #[test]
@@ -143,10 +221,7 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(
-            format!("{}", stream),
-            "write ! ( & mut sql_str , \"${}\" , query_args . len ( ) ) . unwrap ( ) ;"
-        );
+        assert_eq!(format!("{}", stream), "sql_fmt_0 ( & mut builder ) ;");
     }
 
     #[test]
@@ -163,7 +238,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", stream),
-            "if true { write ! ( & mut sql_str , \"SELECT\" ) . unwrap ( ) ; } else { write ! ( & mut sql_str , \"DELETE\" ) . unwrap ( ) ; }"
+            "if true { sql_fmt_2 ( & mut builder ) ; } else { sql_fmt_4 ( & mut builder ) ; }"
         );
     }
 
@@ -182,7 +257,7 @@ mod tests {
         }
         fn fmt1_b0(b: &mut Builder) {
             write!(b.sql, "arg ").unwrap();
-            write!(b.sql, "${}", b.arg_count).unwrap();
+            write!(b.sql, "${} ", b.arg_count).unwrap();
             b.arg_count += 1;
         }
         fn fmt1_b0_0(b: &mut Builder) {
@@ -222,6 +297,6 @@ mod tests {
             fmt1_b0_0(&mut b);
         }
 
-        assert_eq!(b.sql, "SELECT arg SUB ");
+        assert_eq!(b.sql, "SELECT arg $0 SUB ");
     }
 }
