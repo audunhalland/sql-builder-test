@@ -85,36 +85,6 @@ fn gen_sql_fmt_fns(blocks: &[blocks::Block], gen_data: &GenData) -> TokenStream 
     }
 }
 
-fn gen_push_stmt(push: blocks::Push, gen_data: &GenData) -> TokenStream {
-    let builder_ident = &gen_data.builder_ident;
-    match push {
-        blocks::Push::Lit(lit_str) => {
-            quote! {
-                #builder_ident.push_sql(#lit_str);
-            }
-        }
-        blocks::Push::Bind(expr) => {
-            quote! {
-                #builder_ident.push_bind_arg(#expr);
-            }
-        }
-        blocks::Push::Empty => {
-            quote! {}
-        }
-    }
-}
-
-fn gen_pushes(pushes: Vec<blocks::Push>, gen_data: &GenData) -> TokenStream {
-    let stmts: Vec<_> = pushes
-        .into_iter()
-        .map(|push| gen_push_stmt(push, gen_data))
-        .collect();
-
-    quote! {
-        #(#stmts)*
-    }
-}
-
 fn gen_branch(branch: blocks::Branch, gen_data: &GenData) -> TokenStream {
     let then = gen_blocks(branch.then, &gen_data);
     let keywords = branch.keywords;
@@ -140,13 +110,34 @@ fn gen_branches(branches: Vec<blocks::Branch>, gen_data: &GenData) -> TokenStrea
     }
 }
 
+fn gen_param_binds(pushes: &[blocks::Push], gen_data: &GenData) -> TokenStream {
+    let binds = pushes
+        .iter()
+        .filter_map(|push| match push {
+            blocks::Push::Bind(expr) => Some(expr),
+            _ => None,
+        })
+        .map(|expr| {
+            let builder_ident = &gen_data.builder_ident;
+            quote! {
+                #builder_ident.push_bind_arg(#expr);
+            }
+        });
+
+    quote! {
+        #(#binds)*
+    }
+}
+
 fn gen_block(block: blocks::Block, gen_data: &GenData) -> TokenStream {
     match block.op {
-        blocks::Op::Push(_) => {
+        blocks::Op::Push(pushes) => {
             let builder_ident = &gen_data.builder_ident;
             let fmt_fn_ident = get_sql_fmt_fn_ident(&block.id);
+            let param_binds = gen_param_binds(&pushes, gen_data);
             quote! {
                 #fmt_fn_ident(&mut #builder_ident);
+                #param_binds
             }
         }
         blocks::Op::Branch(branches) => gen_branches(branches, gen_data),
@@ -225,7 +216,10 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(format!("{}", stream), "sql_fmt_0 ( & mut builder ) ;");
+        assert_eq!(
+            format!("{}", stream),
+            "sql_fmt_0 ( & mut builder ) ; builder . push_bind_arg ( 42 ) ;"
+        );
     }
 
     #[test]
@@ -243,7 +237,11 @@ mod tests {
         );
         assert_eq!(
             format!("{}", stream),
-            "sql_fmt_0 ( & mut builder ) ; if true { sql_fmt_1_0_0 ( & mut builder ) ; } else { sql_fmt_1_1_0 ( & mut builder ) ; }"
+            concat!(
+                "sql_fmt_0 ( & mut builder ) ; ",
+                "if true { sql_fmt_1_0_0 ( & mut builder ) ; builder . push_bind_arg ( 1 ) ; } ",
+                "else { sql_fmt_1_1_0 ( & mut builder ) ; builder . push_bind_arg ( 2 ) ; }"
+            )
         );
     }
 
