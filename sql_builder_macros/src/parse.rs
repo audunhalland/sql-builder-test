@@ -26,7 +26,7 @@ impl Parse for If {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         Ok(If {
             if_token: input.parse()?,
-            cond: Box::new(input.parse()?), // BUG: https://github.com/dtolnay/syn/issues/789
+            cond: Box::new(syn::Expr::parse_without_eager_brace(input)?),
             then_branch: input.parse()?,
             else_branch: {
                 if input.peek(syn::Token![else]) {
@@ -69,7 +69,7 @@ pub struct Match {
 impl Parse for Match {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let match_token: syn::Token![match] = input.parse()?;
-        let expr = input.parse()?; // BUG: https://github.com/dtolnay/syn/issues/789
+        let expr = syn::Expr::parse_without_eager_brace(input)?;
 
         let content;
         let brace_token = syn::braced!(content in input);

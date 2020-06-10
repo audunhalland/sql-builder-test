@@ -20,7 +20,11 @@ impl Default for GenData {
 }
 
 fn get_sql_fmt_fn_ident(id: &blocks::NodeId) -> proc_macro2::Ident {
-    quote::format_ident!("sql_fmt_{}", id.id)
+    if let Some(parent) = &id.parent {
+        quote::format_ident!("{}_{}", get_sql_fmt_fn_ident(&parent), id.local_index)
+    } else {
+        quote::format_ident!("sql_fmt_{}", id.local_index)
+    }
 }
 
 fn gen_sql_fmt_fn(
@@ -228,17 +232,18 @@ mod tests {
     fn gen_blocks_branches() {
         let stream = test_gen_blocks(
             syn::parse2(quote! {
+                "WITH"
                 if true {
-                    "SELECT"
+                    "SELECT" 1
                 } else {
-                    "DELETE"
+                    "DELETE" 2
                 }
             })
             .unwrap(),
         );
         assert_eq!(
             format!("{}", stream),
-            "if true { sql_fmt_2 ( & mut builder ) ; } else { sql_fmt_4 ( & mut builder ) ; }"
+            "sql_fmt_0 ( & mut builder ) ; if true { sql_fmt_1_0_0 ( & mut builder ) ; } else { sql_fmt_1_1_0 ( & mut builder ) ; }"
         );
     }
 
